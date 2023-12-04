@@ -18,6 +18,11 @@
 #   <http://www.gnu.org/licenses/>.
 #
 
+# This file has been modified, and is part of Dragonfly.
+# Modified by JWebmeister <https://github.com/jwebmeister>
+# Licensed under the LGPL.
+# Original source: <https://github.com/dictation-toolbox/dragonfly>
+
 """
 Recognition state change callbacks
 ----------------------------------------------------------------------------
@@ -80,6 +85,11 @@ class CallbackRecognitionObserver(RecognitionObserver):
         """"""
         self._process_recognition_event("on_begin", [])
 
+    def on_partial_recognition(self, words, rule):
+        """"""
+        self._process_recognition_event("on_partial_recognition", [],
+                                        words=words, rule=rule)
+
     def on_recognition(self, words, results):
         """"""
         self._process_recognition_event("on_recognition", ["words"],
@@ -107,6 +117,21 @@ def register_beginning_callback(function):
     :rtype: CallbackRecognitionObserver
     """
     return CallbackRecognitionObserver("on_begin", function)
+
+
+def register_partial_recognition_callback(function):
+    """
+    Register a callback function to be called on recognition mid-utterance.
+
+    The :class:`CallbackRecognitionObserver` object returned from this
+    function can be used to unregister the callback function.
+
+    :param function: callback function
+    :type function: callable
+    :returns: recognition observer
+    :rtype: CallbackRecognitionObserver
+    """
+    return CallbackRecognitionObserver("on_recognition", function)
 
 
 def register_recognition_callback(function):

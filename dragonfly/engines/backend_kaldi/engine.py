@@ -18,6 +18,11 @@
 #   <http://www.gnu.org/licenses/>.
 #
 
+# This file has been modified, and is part of Dragonfly.
+# Modified by JWebmeister <https://github.com/jwebmeister>
+# Licensed under the LGPL.
+# Original source: <https://github.com/dictation-toolbox/dragonfly>
+
 """
 Kaldi engine classes
 """
@@ -238,7 +243,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
 
         self._log.info("Loading grammar %s" % grammar.name)
         kaldi_rule_by_rule_dict = self._compiler.compile_grammar(grammar, self)
-        wrapper = GrammarWrapper(grammar, kaldi_rule_by_rule_dict, self)
+        wrapper = GrammarWrapper(grammar, kaldi_rule_by_rule_dict, self, self._recognition_observer_manager)
 
         def load():
             for (rule, kaldi_rule) in kaldi_rule_by_rule_dict.items():
@@ -378,6 +383,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                 elif block is not None:
                     if not self._in_phrase:
                         # Start of phrase
+                        self._recognition_observer_manager.notify_begin()
                         with debug_timer(self._log.debug, "computing activity"):
                             kaldi_rules_activity = self._compute_kaldi_rules_activity()
                         self._in_phrase = True
@@ -393,6 +399,8 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                     output, info = self._decoder.get_output()
                     self._log.log(5, "Partial phrase: %r [in_complex=%s]", output, in_complex)
                     kaldi_rule, words, words_are_dictation_mask, in_dictation = self._compiler.parse_partial_output(output)
+                    if isinstance(kaldi_rule, kaldi_active_grammar.KaldiRule):
+                        self._recognition_observer_manager.notify_partial_recognition(words=words, rule=kaldi_rule)
                     in_complex = bool(in_dictation or (kaldi_rule and kaldi_rule.is_complex))
 
                 else:
@@ -669,6 +677,7 @@ class Recognition(object):
         if confidence is not None: self.confidence = confidence
         self.mimic = mimic
         self.acceptable = False
+        self.engine._recognition_observer_manager.notify_failure(results=self)
         self.engine.dispatch_recognition_failure(results=self)
         self.finalized = True
 
@@ -677,9 +686,10 @@ class Recognition(object):
 
 class GrammarWrapper(GrammarWrapperBase):
 
-    def __init__(self, grammar, kaldi_rule_by_rule_dict, engine):
+    def __init__(self, grammar, kaldi_rule_by_rule_dict, engine, recobs_manager):
         GrammarWrapperBase.__init__(self, grammar, engine)
         self.kaldi_rule_by_rule_dict = kaldi_rule_by_rule_dict
+        self.recobs_manager = recobs_manager
 
         self.active = True
         self.exclusive = False
@@ -692,6 +702,8 @@ class GrammarWrapper(GrammarWrapperBase):
         state.initialize_decoding()
         for result in rule.decode(state):
             if state.finished():
+                notify_args = (words, results)
+                self.recobs_manager.notify_recognition(*notify_args)
                 self._process_final_rule(state, words, results, dispatch_other, rule, *args)
                 return True
         return False

@@ -18,6 +18,11 @@
 #   <http://www.gnu.org/licenses/>.
 #
 
+# This file has been modified, and is part of Dragonfly.
+# Modified by JWebmeister <https://github.com/jwebmeister>
+# Licensed under the LGPL.
+# Original source: <https://github.com/dictation-toolbox/dragonfly>
+
 """
 Recognition observer base class
 ============================================================================
@@ -105,6 +110,10 @@ class RecObsManagerBase(object):
 
     def notify_begin(self):
         self._process_observer_callbacks("on_begin", [])
+
+    def notify_partial_recognition(self, words, rule):
+        self._process_observer_callbacks("on_partial_recognition", [],
+                                         words=words, rule=rule)
 
     def notify_recognition(self, words, results):
         self._process_observer_callbacks("on_recognition", ["words"],

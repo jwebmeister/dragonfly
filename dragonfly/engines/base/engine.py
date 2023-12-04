@@ -18,6 +18,11 @@
 #   <http://www.gnu.org/licenses/>.
 #
 
+# This file has been modified, and is part of Dragonfly.
+# Modified by JWebmeister <https://github.com/jwebmeister>
+# Licensed under the LGPL.
+# Original source: <https://github.com/dictation-toolbox/dragonfly>
+
 """
 EngineBase class
 ============================================================================
@@ -207,7 +212,7 @@ class EngineBase(object):
     #  Miscellaneous methods.
 
     def do_recognition(self, begin_callback=None, recognition_callback=None,
-                       failure_callback=None, end_callback=None,
+                       failure_callback=None, end_callback=None, partial_recognition_callback=None,
                        *args, **kwargs):
         """
         Recognize speech in a loop until interrupted or :meth:`disconnect`
@@ -231,15 +236,21 @@ class EngineBase(object):
             ends, either successfully (after calling the recognition
             callback) or in failure (after calling the failure callback).
         :type end_callback: callable | None
+        :param partial_recognition_callback: optional function to be called on
+            recognition mid-utterance.
+        :type partial_recognition_callback: callable | None
         """
         # Import locally to avoid cycles.
         from dragonfly.grammar.recobs_callbacks import (
             register_beginning_callback, register_recognition_callback,
-            register_failure_callback, register_ending_callback
+            register_failure_callback, register_ending_callback,
+            register_partial_recognition_callback
         )
 
         if begin_callback:
             register_beginning_callback(begin_callback)
+        if partial_recognition_callback:
+            register_partial_recognition_callback(partial_recognition_callback)
         if recognition_callback:
             register_recognition_callback(recognition_callback)
         if failure_callback:

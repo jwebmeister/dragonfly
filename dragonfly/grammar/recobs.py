@@ -18,6 +18,11 @@
 #   <http://www.gnu.org/licenses/>.
 #
 
+# This file has been modified, and is part of Dragonfly.
+# Modified by JWebmeister <https://github.com/jwebmeister>
+# Licensed under the LGPL.
+# Original source: <https://github.com/dictation-toolbox/dragonfly>
+
 """
 Recognition observer classes
 ============================================================================
@@ -71,6 +76,12 @@ class RecognitionObserver(object):
         """
         Method called when the observer is registered and speech start is
         detected.
+        """
+
+    def on_partial_recognition(self, words, rule):
+        """
+        Method called when the observer is registered and a rule is recognised
+        mid-utterance.
         """
 
     def on_recognition(self, words, rule, node, results):
