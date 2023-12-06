@@ -50,6 +50,7 @@ from dragonfly.engines.backend_kaldi.dictation  import (user_dictation_list,
                                                         user_dictation_dictlist)
 from dragonfly.engines.backend_kaldi.recobs     import KaldiRecObsManager
 from dragonfly.engines.backend_kaldi.testing    import debug_timer
+from dragonfly.actions import KeyStateGetter
 
 # Import the Kaldi compiler class. Suppress metaclass TypeErrors raised
 # during documentation builds caused by mocking KAG.
@@ -84,6 +85,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
         expected_error_rate_threshold=None,
         alternative_dictation=None,
         compiler_init_config=None, decoder_init_config=None,
+        listen_key=None, listen_key_toggle=0,
         ):
         EngineBase.__init__(self)
         DelegateTimerManagerInterface.__init__(self)
@@ -121,6 +123,11 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
             raise ValueError("retain_audio=True requires retain_dir to be set")
         if retain_approval_func is not None and not callable(retain_approval_func):
             raise TypeError("Invalid retain_approval_func not callable: %r" % (retain_approval_func,))
+        if listen_key is not None and not isinstance(listen_key, int):
+            raise TypeError("Invalid listen_key: %r" % (listen_key,))
+        if listen_key_toggle != 0 and listen_key_toggle != 1 and listen_key_toggle != 2 and listen_key_toggle != -1:
+            raise TypeError(
+                "Invalid listen_key_toggle. 0 for toggle mode off; 1 for toggle mode on; 2 for global toggle on (use VAD); -1 for toggle mode off but allow priority grammar")
 
         self._options = dict(
             model_dir = model_dir,
@@ -145,9 +152,15 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
             alternative_dictation = alternative_dictation,
             compiler_init_config = dict(compiler_init_config) if compiler_init_config else {},
             decoder_init_config = dict(decoder_init_config) if decoder_init_config else {},
+            listen_key = listen_key,
+            listen_key_toggle = listen_key_toggle,
         )
 
         # Setup
+        if sys.platform.startswith("win"):
+            self._listen_key = KeyStateGetter(listen_key, listen_key_toggle)
+        else:
+            self._listen_key = None
         self._reset_state()
         self._recognition_observer_manager = KaldiRecObsManager(self)
         self._timer_manager = DelegateTimerManager(0.02, self)
@@ -167,6 +180,9 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
         self._in_phrase = False
         self._doing_recognition = False
         self._deferred_disconnect = False
+
+        if sys.platform.startswith("win"):
+            self._listen_key.reset()
 
     def connect(self):
         """ Connect to back-end SR engine. """
@@ -372,15 +388,58 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
             self._log.info("Listening...")
             next(audio_iter)  # Prime the audio iterator
 
+            if sys.platform.startswith("win"):
+                has_listen_key = self._listen_key._vkey is not None
+                global_toggle_mode = self._listen_key._toggle_mode == 2
+                priority_toggle_mode = self._listen_key._toggle_mode == -1
+            else:
+                has_listen_key = False
+
+            if has_listen_key:
+                prev_listen_key_on = False
+
+            if priority_toggle_mode:
+                for (key, value) in self._grammar_wrappers.items():
+                    name = value.grammar._name
+                    if isinstance(name, str) and (name.endswith("_priority") or "recobs" in name):
+                        value.active = True
+                    elif False:
+                        value.active = True
+                    else:
+                        value.active = False
+                    print("name={}, active={}".format(name, value.active))
+
             # Loop until timeout (if set) or until disconnect() is called.
             while (not self._deferred_disconnect) and ((not end_time) or (time.time() < end_time)):
                 block = audio_iter.send(in_complex)
+                if has_listen_key:
+                    listen_key_on = self._listen_key.get()
+                    if listen_key_on != prev_listen_key_on:
+                        prev_listen_key_on = listen_key_on
+                        self._log.info("%s mic", "Hot" if listen_key_on else "Cold")
+                        if priority_toggle_mode:
+                            for (key, value) in self._grammar_wrappers.items():
+                                name = value.grammar._name
+                                if isinstance(name, str) and (name.endswith("_priority") or "recobs" in name):
+                                    value.active = True
+                                elif listen_key_on:
+                                    value.active = True
+                                else:
+                                    value.active = False
+                                print("name={}, active={}".format(name, value.active))
+                            
+                else:
+                    listen_key_on = False
 
-                if block is False:
+                if ((block is False) 
+                        or (has_listen_key and not listen_key_on and not self._in_phrase and not priority_toggle_mode)
+                        or (block is None and has_listen_key and listen_key_on)
+                        or (global_toggle_mode and not listen_key_on)):
                     # No audio block available
                     time.sleep(0.001)
 
-                elif block is not None:
+                elif ((block is not None) 
+                        and (not has_listen_key or listen_key_on or priority_toggle_mode)):
                     if not self._in_phrase:
                         # Start of phrase
                         self._recognition_observer_manager.notify_begin()
@@ -399,11 +458,22 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                     output, info = self._decoder.get_output()
                     self._log.log(5, "Partial phrase: %r [in_complex=%s]", output, in_complex)
                     kaldi_rule, words, words_are_dictation_mask, in_dictation = self._compiler.parse_partial_output(output)
+                    expected_error_rate = info.get('expected_error_rate', nan)
+                    confidence = info.get('confidence', nan)
+                    is_acceptable_partial_recognition = isinstance(kaldi_rule, kaldi_active_grammar.KaldiRule) and not (
+                            self._options['expected_error_rate_threshold'] and (expected_error_rate > self._options['expected_error_rate_threshold'])
+                        )
                     if isinstance(kaldi_rule, kaldi_active_grammar.KaldiRule):
+                        self._log.log(15, "Ongoing phrase: eer=%.2f conf=%.2f%s, rule %s, %r",
+                            expected_error_rate, confidence, (" [BAD]" if not is_acceptable_partial_recognition else ""), kaldi_rule, words)
+                    if is_acceptable_partial_recognition:
                         self._recognition_observer_manager.notify_partial_recognition(words=words, rule=kaldi_rule)
                     in_complex = bool(in_dictation or (kaldi_rule and kaldi_rule.is_complex))
 
-                else:
+                elif (not has_listen_key 
+                        or (priority_toggle_mode and not listen_key_on)
+                        or global_toggle_mode 
+                        or (not listen_key_on and self._in_phrase)):
                     # End of phrase
                     self._decoder.decode(b'', True)
                     output, info = self._decoder.get_output()

@@ -18,6 +18,11 @@
 #   <http://www.gnu.org/licenses/>.
 #
 
+# This file has been modified, and is part of Dragonfly.
+# Modified by JWebmeister <https://github.com/jwebmeister>
+# Licensed under the LGPL.
+# Original source: <https://github.com/dictation-toolbox/dragonfly>
+
 import sys
 
 from .action_base             import (ActionBase, DynStrActionBase,
@@ -44,3 +49,4 @@ if sys.platform.startswith("win"):
     from .sendinput           import (KeyboardInput, MouseInput,
                                       HardwareInput, make_input_array,
                                       send_input_array)
+    from .getkeystate import KeyStateGetter
