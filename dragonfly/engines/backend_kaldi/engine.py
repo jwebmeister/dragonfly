@@ -407,7 +407,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                         value.active = True
                     else:
                         value.active = False
-                    print("name={}, active={}".format(name, value.active))
+                    self._log.log(5, "name=%s, active=%s", name, value.active)
 
             # Loop until timeout (if set) or until disconnect() is called.
             while (not self._deferred_disconnect) and ((not end_time) or (time.time() < end_time)):
@@ -426,7 +426,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                                     value.active = True
                                 else:
                                     value.active = False
-                                print("name={}, active={}".format(name, value.active))
+                                self._log.log(5, "name=%s, active=%s", name, value.active)
                             
                 else:
                     listen_key_on = False
