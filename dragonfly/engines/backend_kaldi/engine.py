@@ -388,129 +388,177 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
             self._log.info("Listening...")
             next(audio_iter)  # Prime the audio iterator
 
-            if sys.platform.startswith("win"):
-                has_listen_key = self._listen_key._vkey is not None
-                global_toggle_mode = self._listen_key._toggle_mode == 2
-                priority_hold_mode = self._listen_key._toggle_mode == -1
-            else:
-                has_listen_key = False
+            def has_listen_key():
+                if sys.platform.startswith("win"):
+                    return self._listen_key._vkey is not None
+                else:
+                    return False
+                
+            def listen_key_toggle_mode():
+                if has_listen_key():
+                    return self._listen_key._toggle_mode
+                else:
+                    return None
 
-            if has_listen_key:
-                prev_listen_key_on = False
+            self._prev_listen_key_on = False
+            self._listen_key_on = self._listen_key.get()
 
-            if priority_hold_mode:
+            def check_listen_key_and_enable_grammars():
+                if not has_listen_key():
+                    self._listen_key_on = True
+                    return False
+                self._listen_key_on = self._listen_key.get()
+                if self._listen_key_on != self._prev_listen_key_on:
+                    self._prev_listen_key_on = self._listen_key_on
+                    self._log.info("%s mic", "Hot" if self._listen_key_on else "Cold")
+                    for (key, value) in self._grammar_wrappers.items():
+                        name = value.grammar._name
+                        if self._listen_key_on:
+                            value.active = True
+                        if ((listen_key_toggle_mode() == -1) 
+                                and isinstance(name, str) 
+                                and (name.endswith("_priority") or "recobs" in name)):
+                            value.active = True
+                        self._log.log(10, "name=%s, active=%s", name, value.active)
+                    return True
+                return False
+            
+            def disable_grammars_from_listen_key():
                 for (key, value) in self._grammar_wrappers.items():
                     name = value.grammar._name
-                    if isinstance(name, str) and (name.endswith("_priority") or "recobs" in name):
-                        value.active = True
-                    elif False:
-                        value.active = True
-                    else:
+                    if not self._listen_key_on:
                         value.active = False
-                    self._log.log(5, "name=%s, active=%s", name, value.active)
+                    if ((listen_key_toggle_mode() == -1) 
+                            and isinstance(name, str) 
+                            and (name.endswith("_priority") or "recobs" in name)):
+                        value.active = True
+                    self._log.log(10, "name=%s, active=%s", name, value.active)
+
+            def start_or_mid_of_phrase():
+                nonlocal in_complex
+                if not self._in_phrase:
+                    # Start of phrase
+                    self._recognition_observer_manager.notify_begin()
+                    with debug_timer(self._log.debug, "computing activity"):
+                        kaldi_rules_activity = self._compute_kaldi_rules_activity()
+                    self._in_phrase = True
+                    self._ignore_current_phrase = False
+                    self._grammar_wrappers_copy = self._grammar_wrappers.copy()  # Keep a copy of valid grammar wrappers as of the start of utterance
+
+                else:
+                    # Ongoing phrase
+                    kaldi_rules_activity = None
+                self._decoder.decode(block, False, kaldi_rules_activity)
+                if self.audio_store:
+                    self.audio_store.add_block(block)
+                output, info = self._decoder.get_output()
+                self._log.log(5, "Partial phrase: %r [in_complex=%s]", output, in_complex)
+                kaldi_rule, words, words_are_dictation_mask, in_dictation = self._compiler.parse_partial_output(output)
+                expected_error_rate = info.get('expected_error_rate', nan)
+                confidence = info.get('confidence', nan)
+                is_acceptable_partial_recognition = isinstance(kaldi_rule, kaldi_active_grammar.KaldiRule) and not (
+                        self._options['expected_error_rate_threshold'] and (expected_error_rate > self._options['expected_error_rate_threshold'])
+                    )
+                if isinstance(kaldi_rule, kaldi_active_grammar.KaldiRule):
+                    self._log.log(15, "Ongoing phrase: eer=%.2f conf=%.2f%s, rule %s, %r",
+                        expected_error_rate, confidence, (" [BAD]" if not is_acceptable_partial_recognition else ""), kaldi_rule, words)
+                if is_acceptable_partial_recognition:
+                    self._recognition_observer_manager.notify_partial_recognition(words=words, rule=kaldi_rule)
+                in_complex = bool(in_dictation or (kaldi_rule and kaldi_rule.is_complex))
+                return True
+
+            def end_of_phrase():
+                nonlocal in_complex
+                nonlocal timed_out
+                nonlocal single
+                # End of phrase
+                self._decoder.decode(b'', True)
+                output, info = self._decoder.get_output()
+                if not self._ignore_current_phrase:
+                    expected_error_rate = info.get('expected_error_rate', nan)
+                    confidence = info.get('confidence', nan)
+                    # output = self._compiler.untranslate_output(output)
+                    recognition = self._parse_recognition(output)
+                    is_acceptable_recognition = recognition.kaldi_rule and (recognition.has_dictation or not (
+                        self._options['expected_error_rate_threshold'] and (expected_error_rate > self._options['expected_error_rate_threshold'])
+                    ))
+                    if is_acceptable_recognition:
+                        recognition.process(expected_error_rate=expected_error_rate, confidence=confidence)
+                    else:
+                        recognition.fail(expected_error_rate=expected_error_rate, confidence=confidence)
+
+                    kaldi_rule, parsed_output = recognition.kaldi_rule, recognition.parsed_output
+                    self._log.log(15, "End of phrase: eer=%.2f conf=%.2f%s, rule %s, %r",
+                        expected_error_rate, confidence, (" [BAD]" if not is_acceptable_recognition else ""), kaldi_rule, parsed_output)
+                    if self._saving_adaptation_state and is_acceptable_recognition:  # Don't save adaptation state for bad recognitions
+                        self._decoder.save_adaptation_state()
+                    if self.audio_store:
+                        if kaldi_rule and is_acceptable_recognition:  # Don't store audio/metadata for bad recognitions
+                            self.audio_store.finalize(parsed_output,
+                                kaldi_rule.parent_grammar.name, kaldi_rule.parent_rule.name,
+                                likelihood=expected_error_rate, has_dictation=recognition.has_dictation)
+                        else:
+                            self.audio_store.cancel()
+
+                self._in_phrase = False
+                self._ignore_current_phrase = False
+                in_complex = False
+                timed_out = False
+                if single:
+                    return False
+                self.prepare_for_recognition()  # Do any of this leftover, now that phrase is done
+                return True
+
+            for (key, value) in self._grammar_wrappers.items():
+                name = value.grammar._name
+                if self._listen_key_on:
+                    value.active = True
+                else:
+                    value.active = False
+                if ((listen_key_toggle_mode() == -1) 
+                        and isinstance(name, str) 
+                        and (name.endswith("_priority") or "recobs" in name)):
+                    value.active = True
+                self._log.log(10, "name=%s, active=%s", name, value.active)
 
             # Loop until timeout (if set) or until disconnect() is called.
             while (not self._deferred_disconnect) and ((not end_time) or (time.time() < end_time)):
                 block = audio_iter.send(in_complex)
-                if has_listen_key:
-                    listen_key_on = self._listen_key.get()
-                    if listen_key_on != prev_listen_key_on:
-                        prev_listen_key_on = listen_key_on
-                        self._log.info("%s mic", "Hot" if listen_key_on else "Cold")
-                        if priority_hold_mode:
-                            for (key, value) in self._grammar_wrappers.items():
-                                name = value.grammar._name
-                                if isinstance(name, str) and (name.endswith("_priority") or "recobs" in name):
-                                    value.active = True
-                                elif listen_key_on:
-                                    value.active = True
-                                else:
-                                    value.active = False
-                                self._log.log(5, "name=%s, active=%s", name, value.active)
-                            
-                else:
-                    listen_key_on = False
-
-                if ((block is False) 
-                        or (has_listen_key and not listen_key_on and not self._in_phrase and not priority_hold_mode)
-                        or (block is None and has_listen_key and listen_key_on and not global_toggle_mode)
-                        or (global_toggle_mode and not listen_key_on)):
-                    # No audio block available
-                    time.sleep(0.001)
-
-                elif ((block is not None) 
-                        and (not has_listen_key or listen_key_on or priority_hold_mode)):
-                    if not self._in_phrase:
-                        # Start of phrase
-                        self._recognition_observer_manager.notify_begin()
-                        with debug_timer(self._log.debug, "computing activity"):
-                            kaldi_rules_activity = self._compute_kaldi_rules_activity()
-                        self._in_phrase = True
-                        self._ignore_current_phrase = False
-                        self._grammar_wrappers_copy = self._grammar_wrappers.copy()  # Keep a copy of valid grammar wrappers as of the start of utterance
-
-                    else:
-                        # Ongoing phrase
-                        kaldi_rules_activity = None
-                    self._decoder.decode(block, False, kaldi_rules_activity)
-                    if self.audio_store:
-                        self.audio_store.add_block(block)
-                    output, info = self._decoder.get_output()
-                    self._log.log(5, "Partial phrase: %r [in_complex=%s]", output, in_complex)
-                    kaldi_rule, words, words_are_dictation_mask, in_dictation = self._compiler.parse_partial_output(output)
-                    expected_error_rate = info.get('expected_error_rate', nan)
-                    confidence = info.get('confidence', nan)
-                    is_acceptable_partial_recognition = isinstance(kaldi_rule, kaldi_active_grammar.KaldiRule) and not (
-                            self._options['expected_error_rate_threshold'] and (expected_error_rate > self._options['expected_error_rate_threshold'])
-                        )
-                    if isinstance(kaldi_rule, kaldi_active_grammar.KaldiRule):
-                        self._log.log(15, "Ongoing phrase: eer=%.2f conf=%.2f%s, rule %s, %r",
-                            expected_error_rate, confidence, (" [BAD]" if not is_acceptable_partial_recognition else ""), kaldi_rule, words)
-                    if is_acceptable_partial_recognition:
-                        self._recognition_observer_manager.notify_partial_recognition(words=words, rule=kaldi_rule)
-                    in_complex = bool(in_dictation or (kaldi_rule and kaldi_rule.is_complex))
-
-                elif (not has_listen_key 
-                        or (priority_hold_mode and not listen_key_on)
-                        or global_toggle_mode 
-                        or (not listen_key_on and self._in_phrase)):
-                    # End of phrase
-                    self._decoder.decode(b'', True)
-                    output, info = self._decoder.get_output()
-                    if not self._ignore_current_phrase:
-                        expected_error_rate = info.get('expected_error_rate', nan)
-                        confidence = info.get('confidence', nan)
-                        # output = self._compiler.untranslate_output(output)
-                        recognition = self._parse_recognition(output)
-                        is_acceptable_recognition = recognition.kaldi_rule and (recognition.has_dictation or not (
-                            self._options['expected_error_rate_threshold'] and (expected_error_rate > self._options['expected_error_rate_threshold'])
-                        ))
-                        if is_acceptable_recognition:
-                            recognition.process(expected_error_rate=expected_error_rate, confidence=confidence)
-                        else:
-                            recognition.fail(expected_error_rate=expected_error_rate, confidence=confidence)
-
-                        kaldi_rule, parsed_output = recognition.kaldi_rule, recognition.parsed_output
-                        self._log.log(15, "End of phrase: eer=%.2f conf=%.2f%s, rule %s, %r",
-                            expected_error_rate, confidence, (" [BAD]" if not is_acceptable_recognition else ""), kaldi_rule, parsed_output)
-                        if self._saving_adaptation_state and is_acceptable_recognition:  # Don't save adaptation state for bad recognitions
-                            self._decoder.save_adaptation_state()
-                        if self.audio_store:
-                            if kaldi_rule and is_acceptable_recognition:  # Don't store audio/metadata for bad recognitions
-                                self.audio_store.finalize(parsed_output,
-                                    kaldi_rule.parent_grammar.name, kaldi_rule.parent_rule.name,
-                                    likelihood=expected_error_rate, has_dictation=recognition.has_dictation)
-                            else:
-                                self.audio_store.cancel()
-
-                    self._in_phrase = False
-                    self._ignore_current_phrase = False
-                    in_complex = False
-                    timed_out = False
-                    if single:
-                        break
-                    self.prepare_for_recognition()  # Do any of this leftover, now that phrase is done
-
+                match listen_key_toggle_mode():
+                    case None:
+                        if (block is False): 
+                            time.sleep(0.001)
+                        elif (block is not None): 
+                            start_or_mid_of_phrase()
+                        else: 
+                            if not end_of_phrase(): break
+                    case -1:
+                        changed_listen_key = check_listen_key_and_enable_grammars()
+                        if (block is False) or (block is None and self._listen_key_on): 
+                            time.sleep(0.001)
+                        elif (block is not None): 
+                            start_or_mid_of_phrase()
+                        else: 
+                            if not end_of_phrase(): break
+                        if changed_listen_key: disable_grammars_from_listen_key()
+                    case 0 | 1:
+                        changed_listen_key = check_listen_key_and_enable_grammars()
+                        if (block is False) or (block is None and self._listen_key_on): 
+                            time.sleep(0.001)
+                        elif (block is not None): 
+                            start_or_mid_of_phrase()
+                        else: 
+                            if not end_of_phrase(): break
+                        if changed_listen_key: disable_grammars_from_listen_key()
+                    case 2:
+                        changed_listen_key = check_listen_key_and_enable_grammars()
+                        if (block is False): 
+                            time.sleep(0.001)
+                        elif (block is not None): 
+                            start_or_mid_of_phrase()
+                        else: 
+                            if not end_of_phrase(): break
+                        if changed_listen_key: disable_grammars_from_listen_key()
                 self.call_timer_callback()
 
         except StopIteration:
