@@ -391,14 +391,14 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
             if sys.platform.startswith("win"):
                 has_listen_key = self._listen_key._vkey is not None
                 global_toggle_mode = self._listen_key._toggle_mode == 2
-                priority_toggle_mode = self._listen_key._toggle_mode == -1
+                priority_hold_mode = self._listen_key._toggle_mode == -1
             else:
                 has_listen_key = False
 
             if has_listen_key:
                 prev_listen_key_on = False
 
-            if priority_toggle_mode:
+            if priority_hold_mode:
                 for (key, value) in self._grammar_wrappers.items():
                     name = value.grammar._name
                     if isinstance(name, str) and (name.endswith("_priority") or "recobs" in name):
@@ -417,7 +417,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                     if listen_key_on != prev_listen_key_on:
                         prev_listen_key_on = listen_key_on
                         self._log.info("%s mic", "Hot" if listen_key_on else "Cold")
-                        if priority_toggle_mode:
+                        if priority_hold_mode:
                             for (key, value) in self._grammar_wrappers.items():
                                 name = value.grammar._name
                                 if isinstance(name, str) and (name.endswith("_priority") or "recobs" in name):
@@ -432,14 +432,14 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                     listen_key_on = False
 
                 if ((block is False) 
-                        or (has_listen_key and not listen_key_on and not self._in_phrase and not priority_toggle_mode)
-                        or (block is None and has_listen_key and listen_key_on)
+                        or (has_listen_key and not listen_key_on and not self._in_phrase and not priority_hold_mode)
+                        or (block is None and has_listen_key and listen_key_on and not global_toggle_mode)
                         or (global_toggle_mode and not listen_key_on)):
                     # No audio block available
                     time.sleep(0.001)
 
                 elif ((block is not None) 
-                        and (not has_listen_key or listen_key_on or priority_toggle_mode)):
+                        and (not has_listen_key or listen_key_on or priority_hold_mode)):
                     if not self._in_phrase:
                         # Start of phrase
                         self._recognition_observer_manager.notify_begin()
@@ -471,7 +471,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                     in_complex = bool(in_dictation or (kaldi_rule and kaldi_rule.is_complex))
 
                 elif (not has_listen_key 
-                        or (priority_toggle_mode and not listen_key_on)
+                        or (priority_hold_mode and not listen_key_on)
                         or global_toggle_mode 
                         or (not listen_key_on and self._in_phrase)):
                     # End of phrase
