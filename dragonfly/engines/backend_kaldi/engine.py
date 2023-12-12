@@ -434,9 +434,9 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                         value.active = True
                     self._log.log(10, "name=%s, active=%s", name, value.active)
 
-            def start_or_mid_of_phrase():
+            def start_or_mid_of_phrase(force_start=False):
                 nonlocal in_complex
-                if not self._in_phrase:
+                if not self._in_phrase or force_start:
                     # Start of phrase
                     self._recognition_observer_manager.notify_begin()
                     with debug_timer(self._log.debug, "computing activity"):
@@ -528,7 +528,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                     case None:
                         if (block is False): 
                             time.sleep(0.001)
-                        elif (block is not None): 
+                        elif (block is not None):
                             start_or_mid_of_phrase()
                         else: 
                             if not end_of_phrase(): break
@@ -536,8 +536,9 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                         changed_listen_key = check_listen_key_and_enable_grammars()
                         if (block is False) or (block is None and self._listen_key_on): 
                             time.sleep(0.001)
-                        elif (block is not None): 
-                            start_or_mid_of_phrase()
+                        elif (block is not None):
+                            force_start = changed_listen_key and self._listen_key_on
+                            start_or_mid_of_phrase(force_start)
                         else: 
                             if not end_of_phrase(): break
                         if changed_listen_key: disable_grammars_from_listen_key()
@@ -545,8 +546,9 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                         changed_listen_key = check_listen_key_and_enable_grammars()
                         if (block is False) or (block is None and self._listen_key_on): 
                             time.sleep(0.001)
-                        elif (block is not None): 
-                            start_or_mid_of_phrase()
+                        elif (block is not None):
+                            force_start = changed_listen_key and self._listen_key_on
+                            start_or_mid_of_phrase(force_start)
                         else: 
                             if not end_of_phrase(): break
                         if changed_listen_key: disable_grammars_from_listen_key()
@@ -555,7 +557,8 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                         if (block is False): 
                             time.sleep(0.001)
                         elif (block is not None): 
-                            start_or_mid_of_phrase()
+                            force_start = changed_listen_key and self._listen_key_on
+                            start_or_mid_of_phrase(force_start)
                         else: 
                             if not end_of_phrase(): break
                         if changed_listen_key: disable_grammars_from_listen_key()
