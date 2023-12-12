@@ -460,7 +460,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                         self._options['expected_error_rate_threshold'] and (expected_error_rate > self._options['expected_error_rate_threshold'])
                     )
                 if isinstance(kaldi_rule, kaldi_active_grammar.KaldiRule):
-                    self._log.log(15, "Ongoing phrase: eer=%.2f conf=%.2f%s, rule %s, %r",
+                    self._log.log(14, "Ongoing phrase: eer=%.2f conf=%.2f%s, rule %s, %r",
                         expected_error_rate, confidence, (" [BAD]" if not is_acceptable_partial_recognition else ""), kaldi_rule, words)
                 if is_acceptable_partial_recognition:
                     self._recognition_observer_manager.notify_partial_recognition(words=words, rule=kaldi_rule)
