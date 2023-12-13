@@ -400,9 +400,6 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                 else:
                     return None
 
-            self._prev_listen_key_on = False
-            self._listen_key_on = self._listen_key.get()
-
             def check_listen_key_and_enable_grammars():
                 if not has_listen_key():
                     self._listen_key_on = True
@@ -422,6 +419,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                             value.active = True
                         self._log.log(10, "name=%s, active=%s", name, value.active)
                     self._changed_listen_key = True
+                    self._deferred_changed_listen_key = True
                     return True
                 self._changed_listen_key = False
                 return False
@@ -464,7 +462,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                     )
                 if (isinstance(kaldi_rule, kaldi_active_grammar.KaldiRule) 
                         and (listen_key_toggle_mode() is None or listen_key_toggle_mode() == -1 or self._listen_key_on)):
-                    self._log.log(14, "Ongoing phrase: eer=%.2f conf=%.2f%s, rule %s, %r",
+                    self._log.log(13, "Ongoing phrase: eer=%.2f conf=%.2f%s, rule %s, %r",
                         expected_error_rate, confidence, (" [BAD]" if not is_acceptable_partial_recognition else ""), kaldi_rule, words)
                 if is_acceptable_partial_recognition:
                     self._recognition_observer_manager.notify_partial_recognition(words=words, rule=kaldi_rule)
@@ -493,7 +491,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                         recognition.fail(expected_error_rate=expected_error_rate, confidence=confidence)
 
                     kaldi_rule, parsed_output = recognition.kaldi_rule, recognition.parsed_output
-                    if self._changed_listen_key:
+                    if (listen_key_toggle_mode() is None) or self._deferred_changed_listen_key:
                         self._log.log(15, "End of phrase: eer=%.2f conf=%.2f%s, rule %s, %r",
                             expected_error_rate, confidence, (" [BAD]" if not is_acceptable_recognition else ""), kaldi_rule, parsed_output)
                     if self._saving_adaptation_state and is_acceptable_recognition:  # Don't save adaptation state for bad recognitions
@@ -507,6 +505,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                             self.audio_store.cancel()
 
                 self._changed_listen_key = False
+                self._deferred_changed_listen_key = False
                 self._in_phrase = False
                 self._ignore_current_phrase = False
                 in_complex = False
@@ -516,19 +515,14 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                 self.prepare_for_recognition()  # Do any of this leftover, now that phrase is done
                 return True
 
-            for (key, value) in self._grammar_wrappers.items():
-                name = value.grammar._name
-                if self._listen_key_on:
-                    value.active = True
-                else:
-                    value.active = False
-                if ((listen_key_toggle_mode() == -1) 
-                        and isinstance(name, str) 
-                        and (name.endswith("_priority") or "recobs" in name)):
-                    value.active = True
-                self._log.log(10, "name=%s, active=%s", name, value.active)
+            self._prev_listen_key_on = True
+            self._listen_key_on = self._listen_key.get()
+            self._changed_listen_key = False
+            self._deferred_changed_listen_key = False
+            self._process_stage = None
 
-            defer_disable = False
+            check_listen_key_and_enable_grammars()
+            disable_grammars_from_listen_key()
 
             # Loop until timeout (if set) or until disconnect() is called.
             while (not self._deferred_disconnect) and ((not end_time) or (time.time() < end_time)):
@@ -544,36 +538,83 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                         self.call_timer_callback()
                     case -1 | 0 | 1:
                         check_listen_key_and_enable_grammars() # update self._listen_key_on, self._changed_listen_key
-                        if (block is False and not self._in_phrase) or (block is None and self._listen_key_on): 
+                        if (block is False) or (block is None and self._listen_key_on):
+                            if (not self._listen_key_on and self._in_phrase and self._deferred_changed_listen_key):
+                                if self._process_stage != "end-phrase from sleep1":
+                                    self._log.log(14, "process stage: end-phrase from sleep1")
+                                    self._process_stage = "end-phrase from sleep1"
+                                if not end_of_phrase(): break
+                                disable_grammars_from_listen_key()
+                                self.call_timer_callback()
+                                continue
+                            if self._process_stage != f"sleep1 {block}":
+                                self._log.log(14, "process stage: sleep1 %s", block)
+                                self._process_stage = f"sleep1 {block}"
                             time.sleep(0.001)
                             self.call_timer_callback()
                             continue
-                        if (block is not None and block is not False):
+                        if (block is not None) and not (self._changed_listen_key and not self._listen_key_on):
+                            if self._process_stage != "mid-phrase":
+                                self._log.log(14, "process stage: mid-phrase")
+                                self._process_stage = "mid-phrase"
                             force_start = self._changed_listen_key and self._listen_key_on
                             start_or_mid_of_phrase(force_start)
                             self.call_timer_callback()
                             continue
-                        if (block is None) or (not self._listen_key_on):
+                        if (block is None) or (not self._listen_key_on and self._in_phrase and self._deferred_changed_listen_key):
+                            if self._process_stage != "end-phrase":
+                                self._log.log(14, "process stage: end-phrase")
+                                self._process_stage = "end-phrase"
                             if not end_of_phrase(): break
                             disable_grammars_from_listen_key()
                             self.call_timer_callback()
                             continue
+                        if self._process_stage != "sleep2":
+                            self._log.log(14, "process stage: sleep2")
+                            self._process_stage = "sleep2"
+                        time.sleep(0.001)
+                        self.call_timer_callback()
+                        continue
                     case 2:
                         check_listen_key_and_enable_grammars() # update self._listen_key_on, self._changed_listen_key
-                        if block is False: 
+                        self._ignore_current_phrase = not self._listen_key_on
+                        if (block is False):
+                            if (not self._listen_key_on and self._in_phrase and self._deferred_changed_listen_key):
+                                if self._process_stage != "end-phrase from sleep1":
+                                    self._log.log(14, "process stage: end-phrase from sleep1")
+                                    self._process_stage = "end-phrase from sleep1"
+                                if not end_of_phrase(): break
+                                disable_grammars_from_listen_key()
+                                self.call_timer_callback()
+                                continue
+                            if self._process_stage != f"sleep1 {block}":
+                                self._log.log(14, "process stage: sleep1 %s", block)
+                                self._process_stage = f"sleep1 {block}"
                             time.sleep(0.001)
                             self.call_timer_callback()
                             continue
-                        if (block is not None and block is not False):
+                        if (block is not None) and not (self._changed_listen_key and not self._listen_key_on):
+                            if self._process_stage != "mid-phrase":
+                                self._log.log(14, "process stage: mid-phrase")
+                                self._process_stage = "mid-phrase"
                             force_start = self._changed_listen_key and self._listen_key_on
                             start_or_mid_of_phrase(force_start)
                             self.call_timer_callback()
                             continue
-                        if (block is None) or (not self._listen_key_on):
+                        if (block is None) or (not self._listen_key_on and self._in_phrase and self._deferred_changed_listen_key):
+                            if self._process_stage != "end-phrase":
+                                self._log.log(14, "process stage: end-phrase")
+                                self._process_stage = "end-phrase"
                             if not end_of_phrase(): break
                             disable_grammars_from_listen_key()
                             self.call_timer_callback()
                             continue
+                        if self._process_stage != "sleep2":
+                            self._log.log(14, "process stage: sleep2")
+                            self._process_stage = "sleep2"
+                        time.sleep(0.001)
+                        self.call_timer_callback()
+                        continue
 
         except StopIteration:
             if audio_iter == self._audio_iter:
