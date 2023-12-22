@@ -578,12 +578,13 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                     case 2:
                         check_listen_key_and_enable_grammars() # update self._listen_key_on, self._changed_listen_key
                         self._ignore_current_phrase = not self._listen_key_on
-                        if (block is False):
-                            if (not self._listen_key_on and self._in_phrase and self._deferred_changed_listen_key):
+                        if (block is False) or (block is None and not self._listen_key_on and self._in_phrase):
+                            if (not self._listen_key_on and self._in_phrase):
                                 if self._process_stage != "end-phrase from sleep1":
                                     self._log.log(14, "process stage: end-phrase from sleep1")
                                     self._process_stage = "end-phrase from sleep1"
                                 if not end_of_phrase(): break
+                                self.audio_store.cancel()
                                 disable_grammars_from_listen_key()
                                 self.call_timer_callback()
                                 continue
@@ -601,7 +602,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                             start_or_mid_of_phrase(force_start)
                             self.call_timer_callback()
                             continue
-                        if (block is None) or (not self._listen_key_on and self._in_phrase and self._deferred_changed_listen_key):
+                        if (block is None) or (not self._listen_key_on and self._in_phrase):
                             if self._process_stage != "end-phrase":
                                 self._log.log(14, "process stage: end-phrase")
                                 self._process_stage = "end-phrase"
