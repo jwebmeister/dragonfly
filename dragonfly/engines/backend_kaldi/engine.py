@@ -85,7 +85,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
         expected_error_rate_threshold=None,
         alternative_dictation=None,
         compiler_init_config=None, decoder_init_config=None,
-        listen_key=None, listen_key_toggle=0,
+        listen_key=None, listen_key_toggle=0, listen_key_padding_end_ms=0,
         ):
         EngineBase.__init__(self)
         DelegateTimerManagerInterface.__init__(self)
@@ -128,6 +128,8 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
         if listen_key_toggle != 0 and listen_key_toggle != 1 and listen_key_toggle != 2 and listen_key_toggle != -1:
             raise TypeError(
                 "Invalid listen_key_toggle. 0 for toggle mode off; 1 for toggle mode on; 2 for global toggle on (use VAD); -1 for toggle mode off but allow priority grammar")
+        if not isinstance(listen_key_padding_end_ms, int) or listen_key_padding_end_ms < 0:
+            raise TypeError("Invalid listen_key_padding_end_ms: %r" % (listen_key_padding_end_ms,))
 
         self._options = dict(
             model_dir = model_dir,
@@ -154,6 +156,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
             decoder_init_config = dict(decoder_init_config) if decoder_init_config else {},
             listen_key = listen_key,
             listen_key_toggle = listen_key_toggle,
+            listen_key_padding_end_ms = listen_key_padding_end_ms,
         )
 
         # Setup
@@ -474,11 +477,18 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                 nonlocal in_complex
                 nonlocal timed_out
                 nonlocal single
+                nonlocal block
+                
                 # If we call early, e.g. release listen_key
-                if block is not None and block is not False:
-                    self._decoder.decode(block, False, None)
-                    if self.audio_store:
-                        self.audio_store.add_block(block)
+                listen_key_padding_end_ms = max(1, self._options['listen_key_padding_end_ms'])
+                padding_start_time_ns = time.time_ns()
+                while ((time.time_ns() < padding_start_time_ns + (listen_key_padding_end_ms * (10**6)))):
+                    self._log.log(14, "end called early")
+                    if (block is not None) and (block is not False):
+                        self._decoder.decode(block, False, None)
+                        if self.audio_store:
+                            self.audio_store.add_block(block)
+                    block = audio_iter.send(in_complex)
                 # End of phrase
                 self._decoder.decode(b'', True)
                 output, info = self._decoder.get_output()
