@@ -474,6 +474,11 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                 nonlocal in_complex
                 nonlocal timed_out
                 nonlocal single
+                # If we call early, e.g. release listen_key
+                if block is not None and block is not False:
+                    self._decoder.decode(block, False, None)
+                    if self.audio_store:
+                        self.audio_store.add_block(block)
                 # End of phrase
                 self._decoder.decode(b'', True)
                 output, info = self._decoder.get_output()
