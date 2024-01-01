@@ -480,15 +480,25 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                 nonlocal block
                 
                 # If we call early, e.g. release listen_key
-                listen_key_padding_end_ms = max(1, self._options['listen_key_padding_end_ms'])
-                padding_start_time_ns = time.time_ns()
-                while ((time.time_ns() < padding_start_time_ns + (listen_key_padding_end_ms * (10**6)))):
-                    self._log.log(14, "end called early")
-                    if (block is not None) and (block is not False):
-                        self._decoder.decode(block, False, None)
-                        if self.audio_store:
-                            self.audio_store.add_block(block)
+                if (block is not None) and (block is not False):
+                    self._log.log(14, "end_of_phrase called early")
+                    self._decoder.decode(block, False, None)
+                    if self.audio_store:
+                        self.audio_store.add_block(block)
                     block = audio_iter.send(in_complex)
+                
+                listen_key_padding_end_ms = max(0, self._options['listen_key_padding_end_ms'])
+                padding_start_time_ns = time.time_ns()
+                # Process audio blocks until VAD detects silence or listen_key_padding_end_ms timeout
+                while ((block is not None) and (block is not False)
+                        and (time.time_ns() < padding_start_time_ns + (listen_key_padding_end_ms * (10**6)))
+                       ):
+                    self._log.log(14, "end_of_phrase called early")
+                    self._decoder.decode(block, False, None)
+                    if self.audio_store:
+                        self.audio_store.add_block(block)
+                    block = audio_iter.send(in_complex)
+                
                 # End of phrase
                 self._decoder.decode(b'', True)
                 output, info = self._decoder.get_output()
