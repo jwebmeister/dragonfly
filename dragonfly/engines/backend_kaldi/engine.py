@@ -85,7 +85,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
         expected_error_rate_threshold=None,
         alternative_dictation=None,
         compiler_init_config=None, decoder_init_config=None,
-        listen_key=None, listen_key_toggle=0, listen_key_padding_end_ms=0,
+        listen_key=None, listen_key_toggle=0, listen_key_padding_end_ms=0, listen_key_padding_end_always=False,
         ):
         EngineBase.__init__(self)
         DelegateTimerManagerInterface.__init__(self)
@@ -157,6 +157,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
             listen_key = listen_key,
             listen_key_toggle = listen_key_toggle,
             listen_key_padding_end_ms = listen_key_padding_end_ms,
+            listen_key_padding_end_always = bool(listen_key_padding_end_always),
         )
 
         # Setup
@@ -488,15 +489,17 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                     block = audio_iter.send(in_complex)
                 
                 listen_key_padding_end_ms = max(0, self._options['listen_key_padding_end_ms'])
+                listen_key_padding_end_always = self._options['listen_key_padding_end_always']
                 padding_start_time_ns = time.time_ns()
                 # Process audio blocks until VAD detects silence or listen_key_padding_end_ms timeout
-                while ((block is not None) and (block is not False)
+                while ((listen_key_padding_end_always or ((block is not None) and (block is not False)))
                         and (time.time_ns() < padding_start_time_ns + (listen_key_padding_end_ms * (10**6)))
                        ):
                     self._log.log(14, "end_of_phrase called early")
-                    self._decoder.decode(block, False, None)
-                    if self.audio_store:
-                        self.audio_store.add_block(block)
+                    if (block is not None) and (block is not False):
+                        self._decoder.decode(block, False, None)
+                        if self.audio_store:
+                            self.audio_store.add_block(block)
                     block = audio_iter.send(in_complex)
                 
                 # End of phrase
