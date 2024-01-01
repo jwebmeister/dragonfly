@@ -85,7 +85,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
         expected_error_rate_threshold=None,
         alternative_dictation=None,
         compiler_init_config=None, decoder_init_config=None,
-        listen_key=None, listen_key_toggle=0, listen_key_padding_end_ms=0, listen_key_padding_end_always=False,
+        listen_key=None, listen_key_toggle=0, listen_key_padding_end_ms_min=0, listen_key_padding_end_ms_max=0, listen_key_padding_end_always_max=False,
         ):
         EngineBase.__init__(self)
         DelegateTimerManagerInterface.__init__(self)
@@ -128,8 +128,10 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
         if listen_key_toggle != 0 and listen_key_toggle != 1 and listen_key_toggle != 2 and listen_key_toggle != -1:
             raise TypeError(
                 "Invalid listen_key_toggle. 0 for toggle mode off; 1 for toggle mode on; 2 for global toggle on (use VAD); -1 for toggle mode off but allow priority grammar")
-        if not isinstance(listen_key_padding_end_ms, int) or listen_key_padding_end_ms < 0:
-            raise TypeError("Invalid listen_key_padding_end_ms: %r" % (listen_key_padding_end_ms,))
+        if not isinstance(listen_key_padding_end_ms_min, int) or listen_key_padding_end_ms_min < 0:
+            raise TypeError("Invalid listen_key_padding_end_ms_min: %r" % (listen_key_padding_end_ms_min,))
+        if not isinstance(listen_key_padding_end_ms_max, int) or listen_key_padding_end_ms_max < 0:
+            raise TypeError("Invalid listen_key_padding_end_ms_max: %r" % (listen_key_padding_end_ms_max,))
 
         self._options = dict(
             model_dir = model_dir,
@@ -156,8 +158,9 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
             decoder_init_config = dict(decoder_init_config) if decoder_init_config else {},
             listen_key = listen_key,
             listen_key_toggle = listen_key_toggle,
-            listen_key_padding_end_ms = listen_key_padding_end_ms,
-            listen_key_padding_end_always = bool(listen_key_padding_end_always),
+            listen_key_padding_end_ms_min = listen_key_padding_end_ms_min,
+            listen_key_padding_end_ms_max = listen_key_padding_end_ms_max,
+            listen_key_padding_end_always_max = bool(listen_key_padding_end_always_max),
         )
 
         # Setup
@@ -488,12 +491,16 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                         self.audio_store.add_block(block)
                     block = audio_iter.send(in_complex)
                 
-                listen_key_padding_end_ms = max(0, self._options['listen_key_padding_end_ms'])
-                listen_key_padding_end_always = self._options['listen_key_padding_end_always']
+                listen_key_padding_end_ms_min = max(0, self._options['listen_key_padding_end_ms_min'])
+                listen_key_padding_end_ms_max = max(0, self._options['listen_key_padding_end_ms_max'])
+                listen_key_padding_end_always_max = self._options['listen_key_padding_end_always_max']
                 padding_start_time_ns = time.time_ns()
-                # Process audio blocks until VAD detects silence or listen_key_padding_end_ms timeout
-                while ((listen_key_padding_end_always or ((block is not None) and (block is not False)))
-                        and (time.time_ns() < padding_start_time_ns + (listen_key_padding_end_ms * (10**6)))
+                # Process audio blocks until VAD detects silence or listen_key_padding_end_ms_max timeout
+                current_time = time.time_ns()
+                while ((current_time < padding_start_time_ns + (listen_key_padding_end_ms_max * (10**6)))
+                       and (listen_key_padding_end_always_max 
+                            or (current_time < padding_start_time_ns + (listen_key_padding_end_ms_min * (10**6))) 
+                            or ((block is not None) and (block is not False)))
                        ):
                     self._log.log(14, "end_of_phrase called early")
                     if (block is not None) and (block is not False):
@@ -501,6 +508,7 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                         if self.audio_store:
                             self.audio_store.add_block(block)
                     block = audio_iter.send(in_complex)
+                    current_time = time.time_ns()
                 
                 # End of phrase
                 self._decoder.decode(b'', True)
