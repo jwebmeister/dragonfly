@@ -18,7 +18,7 @@
 #   <http://www.gnu.org/licenses/>.
 #
 
-__version__ = "1.0.0-rc2-dev105"
+__version__ = "1.0.0-rc2-dev106"
 
 import sys
 
