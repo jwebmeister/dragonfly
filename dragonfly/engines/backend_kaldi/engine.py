@@ -484,13 +484,6 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                 nonlocal block
                 
                 # If we call early, e.g. release listen_key
-                if (block is not None) and (block is not False):
-                    self._log.log(14, "end_of_phrase called early")
-                    self._decoder.decode(block, False, None)
-                    if self.audio_store:
-                        self.audio_store.add_block(block)
-                    block = audio_iter.send(in_complex)
-                
                 listen_key_padding_end_ms_min = max(0, self._options['listen_key_padding_end_ms_min'])
                 listen_key_padding_end_ms_max = max(0, self._options['listen_key_padding_end_ms_max'])
                 listen_key_padding_end_always_max = self._options['listen_key_padding_end_always_max']
@@ -500,9 +493,11 @@ class KaldiEngine(EngineBase, DelegateTimerManagerInterface):
                 while ((current_time < padding_start_time_ns + (listen_key_padding_end_ms_max * (10**6)))
                        and (listen_key_padding_end_always_max 
                             or (current_time < padding_start_time_ns + (listen_key_padding_end_ms_min * (10**6))) 
-                            or ((block is not None) and (block is not False)))
+                            or (block is not None))
                        ):
                     self._log.log(14, "end_of_phrase called early")
+                    if block is False:
+                        time.sleep(0.001)
                     if (block is not None) and (block is not False):
                         self._decoder.decode(block, False, None)
                         if self.audio_store:
