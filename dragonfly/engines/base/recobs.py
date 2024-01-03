@@ -19,7 +19,7 @@
 #
 
 # This file has been modified, and is part of Dragonfly.
-# Modified by JWebmeister <https://github.com/jwebmeister>
+# Modified by Joshua Webb <https://github.com/jwebmeister>
 # Licensed under the LGPL.
 # Original source: <https://github.com/dictation-toolbox/dragonfly>
 
@@ -115,9 +115,9 @@ class RecObsManagerBase(object):
         self._process_observer_callbacks("on_partial_recognition", [],
                                          words=words, rule=rule)
 
-    def notify_recognition(self, words, results):
+    def notify_recognition(self, words, results, rule, node):
         self._process_observer_callbacks("on_recognition", ["words"],
-                                         words=words, results=results)
+                                         words=words, results=results, rule=rule, node=node)
         self.notify_end(results)
 
     def notify_failure(self, results):

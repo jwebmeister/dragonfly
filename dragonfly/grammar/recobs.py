@@ -19,7 +19,7 @@
 #
 
 # This file has been modified, and is part of Dragonfly.
-# Modified by JWebmeister <https://github.com/jwebmeister>
+# Modified by Joshua Webb <https://github.com/jwebmeister>
 # Licensed under the LGPL.
 # Original source: <https://github.com/dictation-toolbox/dragonfly>
 
@@ -84,7 +84,7 @@ class RecognitionObserver(object):
         mid-utterance.
         """
 
-    def on_recognition(self, words, rule, node, results):
+    def on_recognition(self, words, results, rule, node):
         """
         Method called when speech successfully decoded to a grammar rule or
         to dictation.
@@ -94,12 +94,12 @@ class RecognitionObserver(object):
 
         :param words: recognized words
         :type words: tuple
+        :param results: *optional* engine recognition results object
+        :type results: :ref:`engine-specific type<RefGrammarCallbackResultsTypes>`
         :param rule: *optional* recognized rule
         :type rule: Rule
         :param node: *optional* parse tree node
         :type node: Node
-        :param results: *optional* engine recognition results object
-        :type results: :ref:`engine-specific type<RefGrammarCallbackResultsTypes>`
         """
 
     def on_failure(self, results):

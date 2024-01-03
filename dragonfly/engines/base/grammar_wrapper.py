@@ -18,6 +18,11 @@
 #   <http://www.gnu.org/licenses/>.
 #
 
+# This file has been modified, and is part of Dragonfly.
+# Modified by Joshua Webb <https://github.com/jwebmeister>
+# Licensed under the LGPL.
+# Original source: <https://github.com/dictation-toolbox/dragonfly>
+
 """
 GrammarWrapperBase class
 ============================================================================
@@ -102,28 +107,32 @@ class GrammarWrapperBase(object):
 
     def _process_final_rule(self, state, words, results, dispatch_other,
                             rule, *args):
+        try:
+            root = state.build_parse_tree()
+        except Exception as e:
+            self._log.exception("Failed to process rule %r: %s",
+                                rule.name, e)
+
         # Dispatch results to other grammars, if appropriate.
         if dispatch_other:
-            self.engine.dispatch_recognition_other(self.grammar, words,
-                                                   results)
+            self.engine.dispatch_recognition_other(self.grammar, words, results, rule, root)
 
         # Call the grammar's general process_recognition method, if it is
         #  present.  Stop if it returns False.
-        stop = self.recognition_process_callback(words, results) is False
+        stop = self.recognition_process_callback(words, results, rule, root) is False
         if stop: return
 
         # Process the recognition.
         try:
-            root = state.build_parse_tree()
             rule.process_recognition(root)
         except Exception as e:
             self._log.exception("Failed to process rule %r: %s",
                                 rule.name, e)
 
-    def recognition_other_callback(self, words, results):
+    def recognition_other_callback(self, words, results, rule, node):
         func = getattr(self.grammar, "process_recognition_other", None)
         if not func: return False
-        self._process_grammar_callback(func, words=words, results=results)
+        self._process_grammar_callback(func, words=words, results=results, rule=rule, node=node)
         return True
 
     def recognition_failure_callback(self, results):
@@ -132,13 +141,13 @@ class GrammarWrapperBase(object):
         self._process_grammar_callback(func, results=results)
         return True
 
-    def recognition_process_callback(self, words, results):
+    def recognition_process_callback(self, words, results, rule, node):
         # Call the `process_recognition' callback, if one has been defined.
         # Return True if grammar rule processing should go ahead.
         func = getattr(self.grammar, "process_recognition", None)
         if func:
-            result = self._process_grammar_callback(func, words=words,
-                                                    results=results)
+            result = self._process_grammar_callback(func, words=words, results=results, 
+                                                    rule=rule, node=node)
             return bool(result)
         return None
 

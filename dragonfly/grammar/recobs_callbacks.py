@@ -19,7 +19,7 @@
 #
 
 # This file has been modified, and is part of Dragonfly.
-# Modified by JWebmeister <https://github.com/jwebmeister>
+# Modified by Joshua Webb <https://github.com/jwebmeister>
 # Licensed under the LGPL.
 # Original source: <https://github.com/dictation-toolbox/dragonfly>
 
@@ -90,10 +90,10 @@ class CallbackRecognitionObserver(RecognitionObserver):
         self._process_recognition_event("on_partial_recognition", [],
                                         words=words, rule=rule)
 
-    def on_recognition(self, words, results):
+    def on_recognition(self, words, results, rule, node):
         """"""
         self._process_recognition_event("on_recognition", ["words"],
-                                        words=words, results=results)
+                                        words=words, results=results, rule=rule, node=node)
 
     def on_failure(self, results):
         """"""

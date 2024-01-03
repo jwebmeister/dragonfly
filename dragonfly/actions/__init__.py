@@ -19,7 +19,7 @@
 #
 
 # This file has been modified, and is part of Dragonfly.
-# Modified by JWebmeister <https://github.com/jwebmeister>
+# Modified by Joshua Webb <https://github.com/jwebmeister>
 # Licensed under the LGPL.
 # Original source: <https://github.com/dictation-toolbox/dragonfly>
 

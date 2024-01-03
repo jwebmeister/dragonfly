@@ -18,6 +18,11 @@
 #   <http://www.gnu.org/licenses/>.
 #
 
+# This file has been modified, and is part of Dragonfly.
+# Modified by Joshua Webb <https://github.com/jwebmeister>
+# Licensed under the LGPL.
+# Original source: <https://github.com/dictation-toolbox/dragonfly>
+
 """
 Recognition observer class for the Kaldi engine back-end
 ============================================================================
@@ -70,8 +75,8 @@ class KaldiRecObsGrammar(Grammar):
         raise RuntimeError("Recognition observer received an unexpected"
                            " recognition: %s" % (words,))
 
-    def process_recognition_other(self, words, results):
-        self._manager.notify_recognition(words, results)
+    def process_recognition_other(self, words, results, rule, node):
+        self._manager.notify_recognition(words, results, rule, node)
 
     def process_recognition_failure(self, results):
         self._manager.notify_failure(results)

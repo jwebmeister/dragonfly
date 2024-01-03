@@ -19,7 +19,7 @@
 #
 
 # This file has been modified, and is part of Dragonfly.
-# Modified by JWebmeister <https://github.com/jwebmeister>
+# Modified by Joshua Webb <https://github.com/jwebmeister>
 # Licensed under the LGPL.
 # Original source: <https://github.com/dictation-toolbox/dragonfly>
 
@@ -907,7 +907,11 @@ class GrammarWrapper(GrammarWrapperBase):
         state.initialize_decoding()
         for result in rule.decode(state):
             if state.finished():
-                notify_args = (words, results)
+                try:
+                    node = state.build_parse_tree()
+                except Exception as e:
+                    self._log.exception("Failed to process rule %r: %s", rule.name, e)
+                notify_args = (words, results, rule, node)
                 self.recobs_manager.notify_recognition(*notify_args)
                 self._process_final_rule(state, words, results, dispatch_other, rule, *args)
                 return True
@@ -915,18 +919,22 @@ class GrammarWrapper(GrammarWrapperBase):
 
     def _process_final_rule(self, state, words, results, dispatch_other,
                             rule, *args):
+        try:
+            root = state.build_parse_tree()
+        except Exception as e:
+            self._log.exception("Failed to process rule %r: %s", rule.name, e)
+
         # Dispatch results to other grammars, if appropriate.
         if dispatch_other:
-            self.engine.dispatch_recognition_other(self.grammar, words, results)
+            self.engine.dispatch_recognition_other(self.grammar, words, results, rule, root)
 
         # Call the grammar's general process_recognition method, if it is present.
         #  Stop if it returns False.
-        stop = self.recognition_process_callback(words, results) is False
+        stop = self.recognition_process_callback(words, results, rule, root) is False
         if stop: return
 
         # Process the recognition.
         try:
-            root = state.build_parse_tree()
             with debug_timer(self.engine._log.debug, "rule execution time"):
                 rule.process_recognition(root)
         except Exception as e:

@@ -19,7 +19,7 @@
 #
 
 # This file has been modified, and is part of Dragonfly.
-# Modified by JWebmeister <https://github.com/jwebmeister>
+# Modified by Joshua Webb <https://github.com/jwebmeister>
 # Licensed under the LGPL.
 # Original source: <https://github.com/dictation-toolbox/dragonfly>
 
@@ -306,7 +306,7 @@ class EngineBase(object):
                                   window.handle)
         self.enable_recognition_observers()
 
-    def dispatch_recognition_other(self, grammar, words, results):
+    def dispatch_recognition_other(self, grammar, words, results, rule, node):
         """
             Dispatch recognition data for a grammar to all other grammars
             with a ``process_recognition_other`` method.
@@ -325,7 +325,7 @@ class EngineBase(object):
         # Note: This is how recognition observers work.
         if wrapper_key in wrappers: wrappers.pop(wrapper_key)
         for wrapper in wrappers:
-            wrapper.recognition_other_callback(words, results)
+            wrapper.recognition_other_callback(words, results, rule, node)
 
     def dispatch_recognition_failure(self, results):
         """
