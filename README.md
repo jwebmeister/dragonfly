@@ -16,7 +16,7 @@ Modifications include:
     - `1: Toggle`; listen while on, press key to toggle on or off, must toggle off to finish utterance.
     - `2: Global toggle`; always listening while on, press key to toggle on or off, finishes utterance based on Voice Activity Detector (VAD).
     - `-1: Priority hold`; always listen for *only* priority grammar (and all recobs), listen for all grammar while key is pressed, release key to finish utterance and also deactivate non-priority grammar.
-
+- Modified `on_recognition` (and related) to include `(words, results, rule, node)`
 
 These modifications are intended to:
 
